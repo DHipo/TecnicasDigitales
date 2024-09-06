@@ -1,3 +1,4 @@
+#include "Network.h"
 #include <Arduino.h>
 
 // put function declarations here:
@@ -6,6 +7,10 @@ int myFunction(int, int);
 void setup() {
   // put your setup code here, to run once:
   int result = myFunction(2, 3);
+  
+  // Haciendo referencia al namespace creado
+  // llamo a la función init
+  Network::Init();
 }
 
 void loop() {
