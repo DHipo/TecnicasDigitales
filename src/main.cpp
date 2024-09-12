@@ -15,6 +15,7 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
+  Network::Run();
 }
 
 // put function definitions here:
