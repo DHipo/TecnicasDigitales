@@ -8,8 +8,8 @@ namespace Network
   const char *apSSID = "PEN-PLOTER";    // Nombre de la red WiFi para el punto de acceso
   const char *apPassword = "123456789"; // Contraseña de la red WiFi para el punto de acceso
 
-  const char *ssid = "TU_SSID";
-  const char *password = "TU_PASSWORD";
+  const char *ssid = "UA-Alumnos";
+  const char *password = "41umn05WLC";
 
   WebServer server(80);
 
@@ -54,6 +54,7 @@ namespace Network
     server.send(200, "text/plain", message);
   }
 
+  
   void Run()
   {
     server.handleClient();
@@ -70,6 +71,9 @@ namespace Network
     }
     Serial.println(WiFi.localIP());
 
+    server.on("/", HTTP_GET, []() {
+      server.send(200, "text/plain", "hola root");
+    });
     server.on("/status", HTTP_GET, handleStatus);
     server.on("/upload", HTTP_POST, []()
               { server.send(200); }, handleUpload);
