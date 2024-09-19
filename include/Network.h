@@ -44,7 +44,7 @@ namespace Network
       Serial.println("Subida iniciada: " + filename);
 
       // Abrir el archivo en modo escritura
-      uploadFile = SPIFFS.(filename, FILE_WRITE);
+      uploadFile = SPIFFS.open(filename, FILE_WRITE);
       if (!uploadFile)
       {
         Serial.println("Error al abrir el archivo para escritura");
