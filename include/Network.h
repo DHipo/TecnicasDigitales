@@ -44,7 +44,7 @@ namespace Network
       Serial.println("Subida iniciada: " + filename);
 
       // Abrir el archivo en modo escritura
-      uploadFile = SPIFFS.open(filename, FILE_WRITE);
+      uploadFile = SPIFFS.(filename, FILE_WRITE);
       if (!uploadFile)
       {
         Serial.println("Error al abrir el archivo para escritura");
@@ -70,7 +70,7 @@ namespace Network
       }
 
       // Responder al cliente que la subida ha sido exitosa
-      server.send(200, "text/plain", "Archivo subido exitosamente.");
+      server.send(200, "text/html", "Archivo subido exitosamente.");
     }
   }
 
@@ -125,6 +125,7 @@ namespace Network
         input[type="file"] { display: none; }
         label { display: inline-block; padding: 10px 20px; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; }
         label:hover { background-color: #0056b3; }
+        #fileName { margin-left: 10px; font-size: 16px; color: #333; }
         #printerStatus { margin-top: 20px; font-weight: bold; color: #00698f; }
         #console { margin-top: 20px; background-color: #333; color: white; padding: 10px; border-radius: 5px; overflow-y: scroll; height: 150px; }
     </style>
@@ -133,9 +134,12 @@ namespace Network
     <div id="container">
         <h1>Controlador de Pen Plotter</h1>
         
-        <form id="uploadForm">
-            <label for="fileInput">Subir archivo</label>
-            <input type="file" id="fileInput" accept=".svg,.png">
+        <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+          <label for="fileInput">Seleccionar Archivo</label>
+          <input type="file" id="fileInput" name="file" accept=".gcode">
+          <span id="fileName"></span>
+          <br><br>
+          <button type="submit">Subir Archivo</button>
         </form>
         
         <div id="printerStatus"></div>
@@ -148,9 +152,20 @@ namespace Network
     <script>
         const form = document.getElementById('uploadForm');
         const fileInput = document.getElementById('fileInput');
+        const fileNameSpan = document.getElementById('fileName');
         const printerStatusDiv = document.getElementById('printerStatus');
+        const submitButton = document.getElementById('submitFile');
         const pauseButton = document.getElementById('pauseButton');
         const consoleDiv = document.getElementById('console');
+
+        // Mostrar el nombre del archivo seleccionado
+        fileInput.addEventListener('change', function() {
+            if (fileInput.files.length > 0) {
+                fileNameSpan.textContent = fileInput.files[0].name; // Mostrar nombre del archivo
+            } else {
+                fileNameSpan.textContent = "Ningún archivo seleccionado";
+            }
+        });
 
         // Función para actualizar el estado de la impresora
         function updatePrinterStatus() {
@@ -163,21 +178,26 @@ namespace Network
         }
 
         // Actualizar el estado cada 5 segundos
-        setInterval(updatePrinxterStatus, 5000);
+        setInterval(updatePrinterStatus, 5000);
 
-        // Manejar la subida de archivos
-        form.addEventListener('submit', function(e){
-            e.preventDefault();
-            const formData = new FormData(this);
-            fetch('./upload', {
+        const form = document.getElementById('uploadForm');
+        form.addEventListener('submit', function(e) {
+            e.preventDefault(); // Evitar que el formulario se envíe por defecto
+
+            const formData = new FormData(form);
+            console.log(e, formData)
+            fetch('/upload', {
                 method: 'POST',
                 body: formData
             })
             .then(response => response.text())
             .then(data => {
-                consoleDiv.innerText += '\nArchivo subido: ' + data;
+                document.getElementById('statusMessage').innerText = 'Archivo subido correctamente: ' + data;
             })
-            .catch(error => console.error('Error:', error));
+            .catch(error => {
+                document.getElementById('statusMessage').innerText = 'Error al subir el archivo';
+                console.error('Error:', error);
+            });
         });
 
         // Manejar el botón de pausa
@@ -198,7 +218,31 @@ namespace Network
   void responseUploadFile()
   {
     Serial.print("Uploading File...");
-    server.send(200, "text/json", "{data: \"ok\"}");
+    server.send(200, "text/plain", "{data: \"ok\"}");
+  }
+
+  void listFiles()
+  {
+    String response = "<html><body><h1>Archivos en SPIFFS</h1><ul>";
+
+    File root = SPIFFS.open("/");
+    if (!root)
+    {
+      response += "<p>Error al abrir SPIFFS.</p>";
+      response += "</ul></body></html>";
+      server.send(500, "text/html", response);
+      return;
+    }
+
+    File file = root.openNextFile();
+    while (file)
+    {
+      response += "<li>" + String(file.name()) + " (" + String(file.size()) + " bytes)</li>";
+      file = root.openNextFile();
+    }
+
+    response += "</ul></body></html>";
+    server.send(200, "text/html", response);
   }
 
   void Run()
@@ -219,6 +263,14 @@ namespace Network
 
   void Init(const bool _wifi = false, const bool _ap = true)
   {
+    // Inicializar SPIFFS
+    if (!SPIFFS.begin(true))
+    {
+      Serial.println("Error al inicializar SPIFFS");
+      return;
+    }
+    Serial.println("SPIFFS montado correctamente");
+
     WiFi.begin();
 
     if (_wifi)
@@ -226,6 +278,7 @@ namespace Network
 
     Serial.println(WiFi.localIP());
 
+    server.onFileUpload(handleUpload);
     server.on("/", HTTP_GET, []()
               { server.send(200, "text/html", htmlContent()); });
 
@@ -234,6 +287,8 @@ namespace Network
     server.on("/upload", HTTP_POST, responseUploadFile, handleUpload);
 
     server.on("/pause", HTTP_GET, handlePause);
+
+    server.on("/list", HTTP_GET, listFiles);
 
     server.begin();
 
