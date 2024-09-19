@@ -1,21 +1,24 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include "SPIFFS.h"
+
+#define SSID "UA-Alumnos"
+#define PASSWORD "41umn05WLC"
+
+#define LOG(x) Serial.print(x)
 
 namespace Network
 {
 
-  const char *apSSID = "PEN-PLOTER";    // Nombre de la red WiFi para el punto de acceso
-  const char *apPassword = "123456789"; // Contraseña de la red WiFi para el punto de acceso
-
-  const char *ssid = "UA-Alumnos";
-  const char *password = "41umn05WLC";
+  const char *apSSID = "PEN-PLOTER"; // Nombre de la red WiFi para el punto de acceso
+  const char *apPassword = "";       // Contraseña de la red WiFi para el punto de acceso
 
   WebServer server(80);
 
-  void setupAccessPoint(const char *ssid, const char *password)
+  void setupAccessPoint(const char *_ssid, const char *_password)
   {
-    WiFi.softAP(ssid, password);
+    WiFi.softAP(_ssid, _password);
 
     // Obtener la dirección IP del Access Point
     IPAddress IP = WiFi.softAPIP();
@@ -32,18 +35,42 @@ namespace Network
   void handleUpload()
   {
     HTTPUpload &upload = server.upload();
+    static File uploadFile; // Archivo donde se guardará la subida
+
     if (upload.status == UPLOAD_FILE_START)
     {
-      Serial.println("Subida iniciada");
+      // Construir el nombre completo del archivo con la ruta en SPIFFS
+      String filename = "/" + upload.filename;
+      Serial.println("Subida iniciada: " + filename);
+
+      // Abrir el archivo en modo escritura
+      uploadFile = SPIFFS.open(filename, FILE_WRITE);
+      if (!uploadFile)
+      {
+        Serial.println("Error al abrir el archivo para escritura");
+        return;
+      }
     }
     else if (upload.status == UPLOAD_FILE_WRITE)
     {
-      Serial.print("Escribiendo archivo...");
+      // Mientras se recibe el archivo, se va escribiendo en SPIFFS
+      if (uploadFile)
+      {
+        uploadFile.write(upload.buf, upload.currentSize);
+        Serial.print("Escribiendo archivo...");
+      }
     }
     else if (upload.status == UPLOAD_FILE_END)
     {
-      Serial.println("Subida finalizada");
-      server.send(200);
+      // Cuando termina la subida, cerramos el archivo
+      if (uploadFile)
+      {
+        uploadFile.close();
+        Serial.println("Subida finalizada. Archivo guardado.");
+      }
+
+      // Responder al cliente que la subida ha sido exitosa
+      server.send(200, "text/plain", "Archivo subido exitosamente.");
     }
   }
 
@@ -54,8 +81,36 @@ namespace Network
     server.send(200, "text/plain", message);
   }
 
-  String htmlContent() {
-  return R"(
+  // Función para leer un archivo HTML y devolver su contenido como un String
+  String readHTMLFile(const char *path)
+  {
+    // Asegúrate de que SPIFFS esté montado
+    if (!SPIFFS.begin(true))
+    {
+      Serial.println("Error al montar SPIFFS");
+      return String();
+    }
+
+    // Abrir el archivo
+    File file = SPIFFS.open(path, "r");
+    if (!file)
+    {
+      Serial.println("Error al abrir el archivo");
+      return String();
+    }
+
+    // Leer el contenido del archivo
+    String fileContent = file.readString();
+
+    // Cerrar el archivo
+    file.close();
+
+    return fileContent; // Devuelve el contenido como String
+  }
+
+  String htmlContent()
+  {
+    return R"(
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -108,13 +163,13 @@ namespace Network
         }
 
         // Actualizar el estado cada 5 segundos
-        setInterval(updatePrinterStatus, 5000);
+        setInterval(updatePrinxterStatus, 5000);
 
         // Manejar la subida de archivos
         form.addEventListener('submit', function(e){
             e.preventDefault();
             const formData = new FormData(this);
-            fetch('/upload', {
+            fetch('./upload', {
                 method: 'POST',
                 body: formData
             })
@@ -138,33 +193,50 @@ namespace Network
 </body>
 </html>
 )";
-}
-  
+  }
+
+  void responseUploadFile()
+  {
+    Serial.print("Uploading File...");
+    server.send(200, "text/json", "{data: \"ok\"}");
+  }
+
   void Run()
   {
     server.handleClient();
   }
 
-  void Init()
+  void ConnectToWiFi(const char *_ssid, const char *_password)
   {
-    WiFi.begin(ssid, password);
+    WiFi.begin(_ssid, _password);
 
     while (WiFi.status() != WL_CONNECTED)
     {
       delay(1000);
-      Serial.println("Connecting to WiFi...");
+      Serial.print("Connecting to WiFi...");
     }
+  }
+
+  void Init(const bool _wifi = false, const bool _ap = true)
+  {
+    WiFi.begin();
+
+    if (_wifi)
+      ConnectToWiFi(SSID, PASSWORD);
+
     Serial.println(WiFi.localIP());
 
-    server.on("/", HTTP_GET, []() {
-      server.send(200, "text/html", htmlContent());
-    });
+    server.on("/", HTTP_GET, []()
+              { server.send(200, "text/html", htmlContent()); });
+
     server.on("/status", HTTP_GET, handleStatus);
-    server.on("/upload", HTTP_POST, []()
-              { server.send(200); }, handleUpload);
+
+    server.on("/upload", HTTP_POST, responseUploadFile, handleUpload);
+
     server.on("/pause", HTTP_GET, handlePause);
 
     server.begin();
+
     setupAccessPoint(apSSID, apPassword);
   }
 
