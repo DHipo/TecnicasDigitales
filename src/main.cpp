@@ -1,11 +1,16 @@
 #include <Arduino.h>
 #include <AccelStepper.h>
 
-#define PIN_STEP 16 // Pin STEP del driver
-#define PIN_DIR 17  // Pin DIR del driver
+#define PIN_STEP_X 16 // Pin STEP del driver
+#define PIN_DIR_X 17  // Pin DIR del driver
+
+#define PIN_STEP_Y 18 // Pin STEP del driver
+#define PIN_DIR_Y 19 // Pin DIR del driver
+
 
 // Inicializamos el motor en modo DRIVER
-AccelStepper motorX(AccelStepper::DRIVER, PIN_STEP, PIN_DIR);
+AccelStepper motorX(AccelStepper::DRIVER, PIN_STEP_X, PIN_DIR_X);
+AccelStepper motorY(AccelStepper::DRIVER, PIN_STEP_Y, PIN_DIR_Y);
 
 // Variables de estado
 float currentX = 0;          // Posición actual en mm
@@ -15,7 +20,7 @@ unsigned long pauseStart;    // Momento de inicio de la pausa
 bool enPausa = false;        // Estado de pausa activa
 int currentCommandIndex = 0; // Índice del comando actual
 
-const float STEPS_PER_MM = 100.0; // Relación pasos por mm
+const float STEPS_PER_MM = 20; // Relación pasos por mm
 
 // Lista de comandos G-code para pruebas
 String gcode[] = {
@@ -29,15 +34,16 @@ String gcode[] = {
 };
 
 // Función para mover el motor a una nueva posición
-void moverMotor(float newX)
+void moverMotor(AccelStepper& motor, float newX)
 {
   int pasosX = newX * STEPS_PER_MM; // Convertir mm a pasos
-  // digitalWrite(PIN_DIR, clockwise ? HIGH : LOW);  // Establecer dirección
-  motorX.move(pasosX);
-  motorX.run();
-  while (motorX.isRunning())
+  digitalWrite(PIN_DIR_X, clockwise);  // Establecer dirección true = izq false = derecha
+  digitalWrite(PIN_DIR_Y, !clockwise);  // Establecer dirección false = arriba true = abajo
+  motor.move(pasosX);
+  motor.run();
+  while (motor.isRunning())
   {
-    motorX.run();
+    motor.run();
   }
 
   currentX = newX; // Actualizar la posición actual
@@ -61,17 +67,17 @@ void cambiarDireccion(bool sentidoHorario)
 }
 
 // Función para detener el motor
-void detenerMotor()
+void detenerMotor(AccelStepper& motor)
 {
-  motorX.stop();           // Detener el motor suavemente
-  motorX.disableOutputs(); // Deshabilitar las salidas para evitar vibraciones
+  motor.stop();           // Detener el motor suavemente
+  motor.disableOutputs(); // Deshabilitar las salidas para evitar vibraciones
   Serial.println("Motor detenido");
 }
 
 // Función para iniciar una pausa no bloqueante
 void iniciarPausa(int tiempo)
 {
-  detenerMotor(); // Asegurar que el motor se detenga
+  detenerMotor(motorX); // Asegurar que el motor se detenga
   enPausa = true;
   pauseStart = millis(); // Registrar el momento de inicio de la pausa
   Serial.printf("Pausa iniciada por %d ms\n", tiempo);
@@ -103,13 +109,13 @@ void interpretarGcode(String comando)
     //    float velocidad = comando.substring(comando.indexOf('F') + 1).toFloat();
     //    establecerVelocidad(velocidad);
     //  }
-    moverMotor(newX);
+    moverMotor(motorX, newX);
     break;
   }
   case 0:
   { // G0: Movimiento rápido
     float newX = comando.substring(comando.indexOf('X') + 1).toFloat();
-    moverMotor(newX);
+    moverMotor(motorX, newX);
     break;
   }
   case 4:
@@ -153,16 +159,25 @@ void ejecutarComandos()
 void setup()
 {
   motorX.setMaxSpeed(8000.0f);
-  motorX.setSpeed(1200);
+  motorX.setSpeed(600);
   motorX.setAcceleration(2000);
+  motorX.enableOutputs();
+  
+  motorY.setMaxSpeed(8000.0f);
+  motorY.setSpeed(600);
+  motorY.setAcceleration(2000);
+  motorY.enableOutputs();
   delay(100);
+  
+  // se regula la corriente
+  moverMotor(motorX, -200);
+  moverMotor(motorX, 200);
 
-  for (int i = 200; i < 4000; i += 200)
-  {
-    moverMotor(100);
-    delay(100);
-  }
-  detenerMotor();
+  moverMotor(motorY, 250);
+  moverMotor(motorY, -250);
+
+  detenerMotor(motorX);
+  detenerMotor(motorY);
 }
 
 void loop()
