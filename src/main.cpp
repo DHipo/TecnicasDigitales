@@ -7,6 +7,8 @@
 #define PIN_STEP_Y 18 // Pin STEP del driver
 #define PIN_DIR_Y 19 // Pin DIR del driver
 
+#define MAX_DISTANCE_X 200 // 20 cm
+#define MAX_DISTANCE_Y 250 // 25 cm
 
 // Inicializamos el motor en modo DRIVER
 AccelStepper motorX(AccelStepper::DRIVER, PIN_STEP_X, PIN_DIR_X);
@@ -14,6 +16,7 @@ AccelStepper motorY(AccelStepper::DRIVER, PIN_STEP_Y, PIN_DIR_Y);
 
 // Variables de estado
 float currentX = 0;          // Posición actual en mm
+float currentY = 0;          // Posición actual en mm
 float feedRate = 250;        // Velocidad predeterminada en pasos/segundo
 bool clockwise = true;       // Dirección del motor (sentido horario)
 unsigned long pauseStart;    // Momento de inicio de la pausa
@@ -24,21 +27,41 @@ const float STEPS_PER_MM = 20; // Relación pasos por mm
 
 // Lista de comandos G-code para pruebas
 String gcode[] = {
-    "G1 X50 F2000", // Mover a X=50 con velocidad 300 pasos/s
-    "G0 X100",      // Movimiento rápido a X=100
-    "G4 S3000",     // Pausar 3 segundos
-    "S1",           // Cambiar dirección a horario
-    "G1 X0 F2000",  // Mover a X=0 con velocidad 300 pasos/s
-    "S0",           // Cambiar dirección a antihorario
-    "G1 X100 F2000" // Mover a X=100 con nueva dirección
+    "G1 X0 Y0",       // Mover a punto inicial (0,0)
+    "G1 X170 Y0",     // Mover a (100,0) - esquina inferior derecha
+    "G1 X0 Y150",   // Mover a (100,100) - esquina superior derecha
+    "G1 X-170 Y0",     // Mover a (0,100) - esquina superior izquierda
+    "G1 X0 Y-150"        // Volver al punto inicial (0,0)
 };
+
+void interpretarDireccion(bool dir) {
+  // Establecer la dirección de los motores
+  digitalWrite(PIN_DIR_X, !dir);       // Dirección del eje X
+  digitalWrite(PIN_DIR_Y, dir);      // Dirección opuesta en el eje Y
+
+  Serial.println(dir ? "Dirección: Horario (X adelante, Y abajo)" : "Dirección: Antihorario (X atrás, Y arriba)");
+}
+
+void interpretarDireccion(const String& comando) {
+  int sentido = comando.substring(1).toInt();
+
+  if (sentido != 0 && sentido != 1) {
+    Serial.println("Error: Comando de dirección inválido (solo S1 o S0).");
+    return;
+  }
+
+  // Establecer la dirección de los motores
+  clockwise = (sentido == 1);
+  digitalWrite(PIN_DIR_X, clockwise);       // Dirección del eje X
+  digitalWrite(PIN_DIR_Y, !clockwise);      // Dirección opuesta en el eje Y
+
+  Serial.println(clockwise ? "Dirección: Horario (X adelante, Y abajo)" : "Dirección: Antihorario (X atrás, Y arriba)");
+}
 
 // Función para mover el motor a una nueva posición
 void moverMotor(AccelStepper& motor, float newX)
 {
   int pasosX = newX * STEPS_PER_MM; // Convertir mm a pasos
-  digitalWrite(PIN_DIR_X, clockwise);  // Establecer dirección true = izq false = derecha
-  digitalWrite(PIN_DIR_Y, !clockwise);  // Establecer dirección false = arriba true = abajo
   motor.move(pasosX);
   motor.run();
   while (motor.isRunning())
@@ -50,20 +73,79 @@ void moverMotor(AccelStepper& motor, float newX)
   Serial.printf("Motor movido a %.2f mm\n", currentX);
 }
 
-// Función para establecer la velocidad del motor
-void establecerVelocidad(float velocidad)
-{
-  feedRate = velocidad;
-  motorX.setMaxSpeed(feedRate);
-  Serial.printf("Velocidad establecida: %.2f pasos/s\n", feedRate);
+void interpretarMovimiento(const String& comando) {
+  int posXIndex = comando.indexOf('X');
+  int posYIndex = comando.indexOf('Y');
+
+  float newX = currentX; // Valor actual como predeterminado
+  float newY = currentY; // Valor actual como predeterminado
+
+  // Extraer y validar la nueva posición en X, si está especificada
+  if (posXIndex != -1) {
+    // Obtener el valor de X desde la posición 'X'
+      // X-160
+      String xValue = comando.substring(posXIndex + 1);
+      //-160
+      // Verificar si hay un signo negativo
+      if (xValue.charAt(0) == '-') {
+          // -160
+          newX = - xValue.substring(1).toFloat();
+      }
+      else {
+        newX = xValue.toFloat();
+      }
+      
+    if (newX > MAX_DISTANCE_X) {
+      Serial.printf("Error: Movimiento en X fuera de límites (0 - %d mm).\n", MAX_DISTANCE_X);
+      return;
+    }
+    
+    newX = -newX; // Invertir para movimiento positivo en X
+  }
+
+  // Extraer y validar la nueva posición en Y, si está especificada
+  if (posYIndex != -1) {
+    // Obtener el valor de X desde la posición 'X'
+      String yValue = comando.substring(posYIndex + 1);
+      // Verificar si hay un signo negativo
+      if (yValue.charAt(0) == '-') {
+          newY = - yValue.substring(1).toFloat();
+      }
+      else {
+        newY = yValue.toFloat();
+      }
+    if (newY > MAX_DISTANCE_Y) {
+      Serial.printf("Error: Movimiento en Y fuera de límites (0 - %d mm).\n", MAX_DISTANCE_Y);
+      return;
+    }
+  }
+
+  // Mover ambos motores a las nuevas posiciones
+  moverMotor(motorX, newX);
+  moverMotor(motorY, newY);
 }
 
-// Función para cambiar la dirección del motor
-void cambiarDireccion(bool sentidoHorario)
-{
-  clockwise = sentidoHorario;
-  Serial.printf("Dirección cambiada: %s\n", clockwise ? "Horario" : "Antihorario");
-  enPausa = true;
+
+void pausa(int tiempoPausa) {
+  Serial.printf("Pausa de %d ms\n", tiempoPausa);
+  delay(tiempoPausa); // Pausar durante el tiempo especificado en milisegundos
+}
+
+// Función para interpretar comandos de pausa G4
+void interpretarPausa(const String& comando) {
+  int tiempoIndex = comando.indexOf('S');
+  if (tiempoIndex == -1) {
+    Serial.println("Error: Comando de pausa sin tiempo especificado.");
+    return;
+  }
+
+  int tiempoPausa = comando.substring(tiempoIndex + 1).toInt();
+  if (tiempoPausa <= 0) {
+    Serial.println("Error: Tiempo de pausa inválido.");
+    return;
+  }
+
+  pausa(tiempoPausa);
 }
 
 // Función para detener el motor
@@ -74,85 +156,18 @@ void detenerMotor(AccelStepper& motor)
   Serial.println("Motor detenido");
 }
 
-// Función para iniciar una pausa no bloqueante
-void iniciarPausa(int tiempo)
-{
-  detenerMotor(motorX); // Asegurar que el motor se detenga
-  enPausa = true;
-  pauseStart = millis(); // Registrar el momento de inicio de la pausa
-  Serial.printf("Pausa iniciada por %d ms\n", tiempo);
-}
+// Función principal de interpretación de G-code
+void interpretarGcode(String comando) {
+  comando.trim(); // Elimina espacios en blanco al inicio y al final
 
-// Verificar si la pausa ha terminado
-bool pausaCompletada(int tiempo)
-{
-  if (millis() - pauseStart >= tiempo)
-  {
-    enPausa = false;
-    Serial.println("Pausa completada");
-    return true;
-  }
-  return false;
-}
-
-// Interpretar y ejecutar comandos G-code
-void interpretarGcode(String comando)
-{
-  String tipoComando = comando.substring(0, 2); // Extraer tipo de comando
-
-  switch (tipoComando.toInt())
-  {
-  case 1:
-  { // G1: Movimiento controlado
-    float newX = comando.substring(comando.indexOf('X') + 1).toFloat();
-    // if (comando.indexOf('F') >= 0) {
-    //    float velocidad = comando.substring(comando.indexOf('F') + 1).toFloat();
-    //    establecerVelocidad(velocidad);
-    //  }
-    moverMotor(motorX, newX);
-    break;
-  }
-  case 0:
-  { // G0: Movimiento rápido
-    float newX = comando.substring(comando.indexOf('X') + 1).toFloat();
-    moverMotor(motorX, newX);
-    break;
-  }
-  case 4:
-  { // G4: Pausa
-    int tiempo = comando.substring(comando.indexOf('S') + 1).toInt();
-    iniciarPausa(tiempo);
-    break;
-  }
-  default:
-  { // Cambiar dirección (S)
-    if (comando.startsWith("S"))
-    {
-      bool sentidoHorario = comando.substring(1).toInt() == 1;
-      cambiarDireccion(sentidoHorario);
-    }
-    else
-    {
-      Serial.println("Comando no reconocido");
-    }
-    break;
-  }
-  }
-}
-
-// Ejecutar el siguiente comando G-code en la lista
-void ejecutarComandos()
-{
-  // Si no estamos en pausa, ejecutar el siguiente comando
-  if (currentCommandIndex < sizeof(gcode) / sizeof(gcode[0]))
-  {
-    Serial.println(gcode[currentCommandIndex]);
-    interpretarGcode(gcode[currentCommandIndex]);
-    currentCommandIndex++; // Avanzar al siguiente comando
-  }
-  else
-  {
-    Serial.println("Todos los comandos ejecutados.");
+  if (comando.startsWith("G1") || comando.startsWith("G0")) {
+    interpretarMovimiento(comando);
+  } else if (comando.startsWith("G4")) {
+    interpretarPausa(comando);
+  } else if (comando.startsWith("S")) {
+    interpretarDireccion(comando);
+  } else {
+    Serial.println("Error: Comando desconocido.");
   }
 }
 
@@ -175,6 +190,12 @@ void setup()
 
   moverMotor(motorY, 250);
   moverMotor(motorY, -250);
+
+  /* do stuff */
+
+  for (int i = 0; i < 5; i++)
+    interpretarGcode(gcode[i]);
+  
 
   detenerMotor(motorX);
   detenerMotor(motorY);
