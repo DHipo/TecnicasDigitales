@@ -15,10 +15,14 @@ AccelStepper motorX(AccelStepper::DRIVER, PIN_STEP_X, PIN_DIR_X);
 AccelStepper motorY(AccelStepper::DRIVER, PIN_STEP_Y, PIN_DIR_Y);
 
 // Variables de estado
-float currentX = 0;          // Posición actual en mm
-float currentY = 0;          // Posición actual en mm
+struct fVec2 {
+  float x,y;
+};
+
+fVec2 position = {0.f, 0.f};
+
 float feedRate = 250;        // Velocidad predeterminada en pasos/segundo
-bool clockwise = true;       // Dirección del motor (sentido horario)
+bool clockwise = false;       // Dirección del motor (sentido horario)
 unsigned long pauseStart;    // Momento de inicio de la pausa
 bool enPausa = false;        // Estado de pausa activa
 int currentCommandIndex = 0; // Índice del comando actual
@@ -26,13 +30,39 @@ int currentCommandIndex = 0; // Índice del comando actual
 const float STEPS_PER_MM = 20; // Relación pasos por mm
 
 // Lista de comandos G-code para pruebas
-String gcode[] = {
+String gcode_rectangulo[] = {
     "G1 X0 Y0",       // Mover a punto inicial (0,0)
     "G1 X170 Y0",     // Mover a (100,0) - esquina inferior derecha
     "G1 X0 Y150",   // Mover a (100,100) - esquina superior derecha
     "G1 X-170 Y0",     // Mover a (0,100) - esquina superior izquierda
     "G1 X0 Y-150"        // Volver al punto inicial (0,0)
 };
+
+// Lista de comandos G-code para dibujar un círculo en segmentos rectos, un eje a la vez
+String gcode_circulo[] = {
+    "G1 X0 Y125",     // Mover a (10,0)
+    "G1 X130 Y0",    // Mover a (10,10)
+    "G1 X-30 Y30",     // Mover a (0,10)
+    "G1 X-30 Y-30",   // Mover a (-10,10)
+    "G1 X30 Y-30",    // Mover a (-10,0)
+    "G1 X30 Y30",  // Mover a (-10,-10)
+};
+
+void moverMotores(float posX, float posY){
+  // Mover ambos motores a las nuevas posiciones
+  motorX.move(posX * STEPS_PER_MM);
+  motorY.move(posY * STEPS_PER_MM);
+
+  while (motorX.isRunning() || motorY.isRunning())
+  {
+    motorX.run();
+    motorY.run();
+  }
+
+  position.y += posY;
+  position.x += posX;
+  Serial.printf("current pos: (%.2f, %.2f)", position.x, position.y);
+}
 
 void interpretarDireccion(bool dir) {
   // Establecer la dirección de los motores
@@ -53,54 +83,35 @@ void interpretarDireccion(const String& comando) {
   // Establecer la dirección de los motores
   clockwise = (sentido == 1);
   digitalWrite(PIN_DIR_X, clockwise);       // Dirección del eje X
-  digitalWrite(PIN_DIR_Y, !clockwise);      // Dirección opuesta en el eje Y
+  digitalWrite(PIN_DIR_Y, clockwise);      // Dirección opuesta en el eje Y
 
   Serial.println(clockwise ? "Dirección: Horario (X adelante, Y abajo)" : "Dirección: Antihorario (X atrás, Y arriba)");
-}
-
-// Función para mover el motor a una nueva posición
-void moverMotor(AccelStepper& motor, float newX)
-{
-  int pasosX = newX * STEPS_PER_MM; // Convertir mm a pasos
-  motor.move(pasosX);
-  motor.run();
-  while (motor.isRunning())
-  {
-    motor.run();
-  }
-
-  currentX = newX; // Actualizar la posición actual
-  Serial.printf("Motor movido a %.2f mm\n", currentX);
 }
 
 void interpretarMovimiento(const String& comando) {
   int posXIndex = comando.indexOf('X');
   int posYIndex = comando.indexOf('Y');
-
-  float newX = currentX; // Valor actual como predeterminado
-  float newY = currentY; // Valor actual como predeterminado
+  // "G1X-10Y-10"
+  float newX = position.x; // Valor actual como predeterminado
+  float newY = position.y; // Valor actual como predeterminado
 
   // Extraer y validar la nueva posición en X, si está especificada
   if (posXIndex != -1) {
     // Obtener el valor de X desde la posición 'X'
-      // X-160
-      String xValue = comando.substring(posXIndex + 1);
-      //-160
-      // Verificar si hay un signo negativo
-      if (xValue.charAt(0) == '-') {
-          // -160
-          newX = - xValue.substring(1).toFloat();
-      }
-      else {
-        newX = xValue.toFloat();
-      }
-      
-    if (newX > MAX_DISTANCE_X) {
+    // X-160
+    String xValue = comando.substring(posXIndex + 1);
+    //-160
+    // Verificar si hay un signo negativo
+    if (xValue.charAt(0) == '-')
+        newX = - xValue.substring(1).toFloat();
+    else 
+      newX = xValue.toFloat();
+    Serial.printf("newX value: %.2f\n", newX);
+    if ( position.x + newX < 0 || position.x + newX > MAX_DISTANCE_X) {
       Serial.printf("Error: Movimiento en X fuera de límites (0 - %d mm).\n", MAX_DISTANCE_X);
       return;
     }
-    
-    newX = -newX; // Invertir para movimiento positivo en X
+
   }
 
   // Extraer y validar la nueva posición en Y, si está especificada
@@ -108,21 +119,19 @@ void interpretarMovimiento(const String& comando) {
     // Obtener el valor de X desde la posición 'X'
       String yValue = comando.substring(posYIndex + 1);
       // Verificar si hay un signo negativo
-      if (yValue.charAt(0) == '-') {
+      if (yValue.charAt(0) == '-') 
           newY = - yValue.substring(1).toFloat();
-      }
-      else {
+      else
         newY = yValue.toFloat();
-      }
-    if (newY > MAX_DISTANCE_Y) {
+    
+    Serial.printf("newY value: %.2f\n", newY);
+    if ( position.y + newY < 0 || position.y + newY > MAX_DISTANCE_Y) {
       Serial.printf("Error: Movimiento en Y fuera de límites (0 - %d mm).\n", MAX_DISTANCE_Y);
       return;
     }
   }
-
-  // Mover ambos motores a las nuevas posiciones
-  moverMotor(motorX, newX);
-  moverMotor(motorY, newY);
+  Serial.printf("moving to x: %.2f y: %.2f", newX, newY);
+  moverMotores(newX, newY);
 }
 
 
@@ -171,8 +180,17 @@ void interpretarGcode(String comando) {
   }
 }
 
+void backToOrigin(){
+  moverMotores((-position.x) * .91, (-position.y) * .91);
+}
+
 void setup()
 {
+  Serial.begin(115200);
+  position = {.01f, .01f};
+  motorX.setCurrentPosition(0);
+  motorY.setCurrentPosition(0);
+
   motorX.setMaxSpeed(8000.0f);
   motorX.setSpeed(600);
   motorX.setAcceleration(2000);
@@ -182,20 +200,20 @@ void setup()
   motorY.setSpeed(600);
   motorY.setAcceleration(2000);
   motorY.enableOutputs();
+
+  //ni idea si funca
+  motorX.setPinsInverted(true);
+  moverMotores(10.f, 0.f);
+  moverMotores(-10.f, 0.f);
+
+  motorY.setPinsInverted(false);
+  moverMotores(0.f, 10.f);
+  moverMotores(0.f, -10.f);
+
   delay(100);
-  
-  // se regula la corriente
-  moverMotor(motorX, -200);
-  moverMotor(motorX, 200);
-
-  moverMotor(motorY, 250);
-  moverMotor(motorY, -250);
-
   /* do stuff */
-
-  for (int i = 0; i < 5; i++)
-    interpretarGcode(gcode[i]);
-  
+  for (int i = 0; i < sizeof(gcode_circulo)/sizeof(gcode_circulo[0]); i++)
+    interpretarGcode(gcode_circulo[i]);
 
   detenerMotor(motorX);
   detenerMotor(motorY);
