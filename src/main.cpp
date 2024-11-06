@@ -7,6 +7,8 @@
 #define PIN_STEP_Y 18 // Pin STEP del driver
 #define PIN_DIR_Y 19 // Pin DIR del driver
 
+#define PIN_PULSADOR 21
+
 #define MAX_DISTANCE_X 200 // 20 cm
 #define MAX_DISTANCE_Y 250 // 25 cm
 
@@ -48,6 +50,20 @@ String gcode_circulo[] = {
     "G1 X30 Y30",  // Mover a (-10,-10)
 };
 
+String gcode_arco[] = {
+  "G1 X0 Y100",
+  "G1 X80 Y0",
+  "G1 X100 Y80"
+};
+
+String circleGCode[] = {
+  "G00 X0 Y0",
+  "G01 Z-1 F100",
+  "G02 X100 Y0 I50",
+  "G00 Z0.5",
+  "M30"
+};
+
 void moverMotores(float posX, float posY){
   // Mover ambos motores a las nuevas posiciones
   motorX.move(posX * STEPS_PER_MM);
@@ -59,9 +75,58 @@ void moverMotores(float posX, float posY){
     motorY.run();
   }
 
-  position.y += posY;
-  position.x += posX;
-  Serial.printf("current pos: (%.2f, %.2f)", position.x, position.y);
+  position.y = motorY.currentPosition() / STEPS_PER_MM;
+  position.x = motorX.currentPosition() / STEPS_PER_MM;
+  Serial.printf("current pos: (%.2f, %.2f)\n", position.x, position.y);
+}
+
+void actualizarPosicionActual() {
+  position.x = motorX.currentPosition();
+  position.y = motorY.currentPosition();
+
+  Serial.printf("current pos: (%.2f, %.2f)\n", position.x, position.y);
+}
+
+void interpretarCurva(const String& comando) {
+  int iIndex = comando.indexOf('I');
+  int jIndex = comando.indexOf('J');
+  int pIndex = comando.indexOf('P');
+  int qIndex = comando.indexOf('Q');
+
+  float i = 0, j = 0, p = 0, q = 0;
+
+  if (iIndex != -1) i = comando.substring(iIndex + 1, jIndex).toFloat();
+  if (jIndex != -1) j = comando.substring(jIndex + 1, pIndex).toFloat();
+  if (pIndex != -1) p = comando.substring(pIndex + 1, qIndex).toFloat();
+  if (qIndex != -1) q = comando.substring(qIndex + 1).toFloat();
+
+  Serial.printf("Ejecutando G5: Movimiento en arco desde (%.2f, %.2f) a (%.2f, %.2f), I=%.2f, J=%.2f, P=%.2f, Q=%.2f\n", 
+                position.x, position.y, position.x + i, position.y + j, i, j, p, q);
+
+  // Calcular los deltas entre el punto actual y el punto final
+  float deltaX = i;
+  float deltaY = j;
+
+  // Calcular el punto de control para el arco
+  float controlX = position.x + (deltaX / 2);
+  float controlY = position.y + (deltaY / 2);
+
+  // Interpolación cuadrática para calcular los puntos de control
+  for (int t = 0; t <= 100; t++) { // 100 pasos por defecto
+    float u = (float)t / 100.0f;
+    
+    float x = (1 - u) * (1 - u) * position.x + 2 * (1 - u) * u * controlX + u * u * (position.x + deltaX);
+    float y = (1 - u) * (1 - u) * position.y + 2 * (1 - u) * u * controlY + u * u * (position.y + deltaY);
+
+    // Aplicar tensiones P y Q
+    float px = x + (p * (x - controlX));
+    float py = y + (q * (y - controlY));
+
+    // Mover los motores a la posición calculada
+    moverMotores(px - position.x, py - position.y);
+    
+    delay(10); // Delay para controlar la velocidad de movimiento
+  }
 }
 
 void interpretarDireccion(bool dir) {
@@ -156,23 +221,68 @@ void interpretarPausa(const String& comando) {
 
   pausa(tiempoPausa);
 }
+void interpretarArco(const String& comando) {
+  int iIndex = comando.indexOf('I');
+  int jIndex = comando.indexOf('J');
+  int pIndex = comando.indexOf('P');
+  int qIndex = comando.indexOf('Q');
+
+  float i = 0, j = 0, p = 0, q = 0;
+
+  if (iIndex != -1) i = comando.substring(iIndex + 1, jIndex).toFloat();
+  if (jIndex != -1) j = comando.substring(jIndex + 1, pIndex).toFloat();
+  if (pIndex != -1) p = comando.substring(pIndex + 1, qIndex).toFloat();
+  if (qIndex != -1) q = comando.substring(qIndex + 1).toFloat();
+
+  Serial.printf("Ejecutando G02: Movimiento en arco desde (%.2f, %.2f) a (%.2f, %.2f), I=%.2f, J=%.2f, P=%.2f, Q=%.2f\n", 
+                position.x, position.y, position.x + i, position.y + j, i, j, p, q);
+
+  // Calcular los deltas entre el punto actual y el punto final
+  float deltaX = i;
+  float deltaY = j;
+
+  // Calcular el punto de control para el arco
+  float controlX = position.x + (deltaX / 2);
+  float controlY = position.y + (deltaY / 2);
+
+  // Interpolación cuadrática para calcular los puntos de control
+  for (int t = 0; t <= 100; t++) { // 100 pasos por defecto
+    float u = (float)t / 100.0f;
+    
+    float x = (1 - u) * (1 - u) * position.x + 2 * (1 - u) * u * controlX + u * u * (position.x + deltaX);
+    float y = (1 - u) * (1 - u) * position.y + 2 * (1 - u) * u * controlY + u * u * (position.y + deltaY);
+
+    // Aplicar tensiones P y Q
+    float px = x + (p * (x - controlX));
+    float py = y + (q * (y - controlY));
+
+    // Mover los motores a la posición calculada
+    moverMotores(px - position.x, py - position.y);
+    
+    delay(10); // Delay para controlar la velocidad de movimiento
+  }
+}
+
 
 // Función para detener el motor
 void detenerMotor(AccelStepper& motor)
 {
   motor.stop();           // Detener el motor suavemente
-  motor.disableOutputs(); // Deshabilitar las salidas para evitar vibraciones
+  motor.disableOutputs(); // Deshabilitar las salidas para evitar vibracione
   Serial.println("Motor detenido");
 }
 
-// Función principal de interpretación de G-code
 void interpretarGcode(String comando) {
-  comando.trim(); // Elimina espacios en blanco al inicio y al final
+  comando.trim();
 
   if (comando.startsWith("G1") || comando.startsWith("G0")) {
     interpretarMovimiento(comando);
   } else if (comando.startsWith("G4")) {
     interpretarPausa(comando);
+  } else if (comando.startsWith("G5")) {
+    interpretarCurva(comando);
+  } else if (comando.startsWith("G02")) {
+    interpretarArco(comando);
   } else if (comando.startsWith("S")) {
     interpretarDireccion(comando);
   } else {
@@ -180,14 +290,12 @@ void interpretarGcode(String comando) {
   }
 }
 
+
 void backToOrigin(){
-  moverMotores((-position.x) * .91, (-position.y) * .91);
+  moverMotores((-position.x), (-position.y));
 }
 
-void setup()
-{
-  Serial.begin(115200);
-  position = {.01f, .01f};
+void initMotores(){
   motorX.setCurrentPosition(0);
   motorY.setCurrentPosition(0);
 
@@ -204,16 +312,23 @@ void setup()
   //ni idea si funca
   motorX.setPinsInverted(true);
   moverMotores(10.f, 0.f);
-  moverMotores(-10.f, 0.f);
 
   motorY.setPinsInverted(false);
   moverMotores(0.f, 10.f);
-  moverMotores(0.f, -10.f);
 
+  backToOrigin();
+}
+
+void setup()
+{
+  Serial.begin(115200);
+  pinMode(PIN_PULSADOR, INPUT);
+  initMotores();
   delay(100);
+
   /* do stuff */
-  for (int i = 0; i < sizeof(gcode_circulo)/sizeof(gcode_circulo[0]); i++)
-    interpretarGcode(gcode_circulo[i]);
+  for (int i = 0; i < sizeof(gcode_rectangulo)/sizeof(gcode_rectangulo[0]); i++)
+    interpretarGcode(gcode_rectangulo[i]);
 
   detenerMotor(motorX);
   detenerMotor(motorY);
@@ -221,4 +336,6 @@ void setup()
 
 void loop()
 {
+  if (digitalRead(PIN_PULSADOR))
+    backToOrigin();
 }
