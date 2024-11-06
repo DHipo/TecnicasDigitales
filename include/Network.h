@@ -1,6 +1,9 @@
+#pragma once
+
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include "Engine.h"
 #include "SPIFFS.h"
 
 #define SSID "UA-Alumnos"
@@ -10,11 +13,12 @@
 
 namespace Network
 {
-
+  String htmlContent();
   const char *apSSID = "PEN-PLOTER"; // Nombre de la red WiFi para el punto de acceso
   const char *apPassword = "";       // Contraseña de la red WiFi para el punto de acceso
 
   WebServer server(80);
+  RequestHandler request;
 
   void setupAccessPoint(const char *_ssid, const char *_password)
   {
@@ -76,9 +80,7 @@ namespace Network
 
   void handlePause()
   {
-    // Aquí implementarías la lógica para pausar o reanudar la impresión
-    String message = "Impresión pausada"; // O "Impresión reanudada"
-    server.send(200, "text/plain", message);
+    Engine::m_shouldPause = Engine::m_shouldPause;
   }
 
   // Función para leer un archivo HTML y devolver su contenido como un String
@@ -108,111 +110,47 @@ namespace Network
     return fileContent; // Devuelve el contenido como String
   }
 
-  String htmlContent()
+  void handleSendGcode()
   {
-    return R"(
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controlador de Pen Plotter</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-        #container { max-width: 800px; margin: 0 auto; background-color: #f0f0f0; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; transition: background-color 0.3s ease; }
-        button:hover { background-color: #ddd; }
-        input[type="file"] { display: none; }
-        label { display: inline-block; padding: 10px 20px; background-color: #007bff; color: white; border-radius: 5px; cursor: pointer; }
-        label:hover { background-color: #0056b3; }
-        #fileName { margin-left: 10px; font-size: 16px; color: #333; }
-        #printerStatus { margin-top: 20px; font-weight: bold; color: #00698f; }
-        #console { margin-top: 20px; background-color: #333; color: white; padding: 10px; border-radius: 5px; overflow-y: scroll; height: 150px; }
-    </style>
-</head>
-<body>
-    <div id="container">
-        <h1>Controlador de Pen Plotter</h1>
-        
-        <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
-          <label for="fileInput">Seleccionar Archivo</label>
-          <input type="file" id="fileInput" name="file" accept=".gcode">
-          <span id="fileName"></span>
-          <br><br>
-          <button type="submit">Subir Archivo</button>
-        </form>
-        
-        <div id="printerStatus"></div>
-        
-        <button id="pauseButton">Pausar impresión</button>
-        
-        <div id="console"></div>
-    </div>
+    int contentLength = server.client().available();
+    Serial.print("Content Length: ");
+    Serial.println(contentLength);
 
-    <script>
-        const form = document.getElementById('uploadForm');
-        const fileInput = document.getElementById('fileInput');
-        const fileNameSpan = document.getElementById('fileName');
-        const printerStatusDiv = document.getElementById('printerStatus');
-        const submitButton = document.getElementById('submitFile');
-        const pauseButton = document.getElementById('pauseButton');
-        const consoleDiv = document.getElementById('console');
+    if (contentLength == 0)
+    {
+      Serial.println("No body to extract");
+      return;
+    }
 
-        // Mostrar el nombre del archivo seleccionado
-        fileInput.addEventListener('change', function() {
-            if (fileInput.files.length > 0) {
-                fileNameSpan.textContent = fileInput.files[0].name; // Mostrar nombre del archivo
-            } else {
-                fileNameSpan.textContent = "Ningún archivo seleccionado";
-            }
-        });
+    String gCodeContent;
+    while (server.client().available())
+    {
+      gCodeContent += (char)server.client().read();
+    }
 
-        // Función para actualizar el estado de la impresora
-        function updatePrinterStatus() {
-            fetch('/status')
-                .then(response => response.text())
-                .then(data => {
-                    printerStatusDiv.innerHTML = data;
-                })
-                .catch(error => console.error('Error:', error));
-        }
+    Serial.print("Contenido del G-code recibido: ");
+    Serial.println(gCodeContent);
 
-        // Actualizar el estado cada 5 segundos
-        setInterval(updatePrinterStatus, 5000);
+    // Procesar el G-code y separarlo en líneas
+    std::vector<String> gCodeLines;
+    int pos = 0;
+    while ((pos = gCodeContent.indexOf(';')) != -1)
+    {
+      String line = gCodeContent.substring(0, pos);
+      Serial.println(line);
+      gCodeLines.push_back(line);
+      gCodeContent = gCodeContent.substring(pos + 1);
+    }
 
-        const form = document.getElementById('uploadForm');
-        form.addEventListener('submit', function(e) {
-            e.preventDefault(); // Evitar que el formulario se envíe por defecto
+    // Añadir la última línea si existe
+    if (gCodeContent.length() > 0)
+    {
+      gCodeLines.push_back(gCodeContent);
+    }
 
-            const formData = new FormData(form);
-            console.log(e, formData)
-            fetch('/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.text())
-            .then(data => {
-                document.getElementById('statusMessage').innerText = 'Archivo subido correctamente: ' + data;
-            })
-            .catch(error => {
-                document.getElementById('statusMessage').innerText = 'Error al subir el archivo';
-                console.error('Error:', error);
-            });
-        });
-
-        // Manejar el botón de pausa
-        pauseButton.addEventListener('click', function(){
-            fetch('/pause')
-                .then(response => response.text())
-                .then(data => {
-                    consoleDiv.innerText += '\n' + data;
-                })
-                .catch(error => console.error('Error:', error));
-        });
-    </script>
-</body>
-</html>
-)";
+    Serial.printf("size of gcodelines: %d", gCodeLines.size());
+    Engine::setCurrentGcode(gCodeLines);
+    server.send(200, "text/plain", "data received");
   }
 
   void responseUploadFile()
@@ -286,13 +224,162 @@ namespace Network
 
     server.on("/upload", HTTP_POST, responseUploadFile, handleUpload);
 
-    server.on("/pause", HTTP_GET, handlePause);
+    server.on("/pause", HTTP_POST, handlePause);
 
     server.on("/list", HTTP_GET, listFiles);
+    server.on("/sendGcode", HTTP_POST, []()
+              { Serial.printf("args: %d", server.args()); server.send(200, "text/plain", "recibido"); }, handleSendGcode);
 
     server.begin();
 
     setupAccessPoint(apSSID, apPassword);
   }
 
+  String htmlContent()
+  {
+    return R"(<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controlador de Pen Plotter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        #container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #f0f0f0;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #ddd;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        label {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        label:hover {
+            background-color: #0056b3;
+        }
+
+        #printerStatus {
+            margin-top: 20px;
+            font-weight: bold;
+            color: #00698f;
+        }
+
+        #console {
+            margin-top: 20px;
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-y: scroll;
+            height: 150px;
+        }
+
+        #status {
+            font-size: larger;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container">
+        <h1>Controlador de Pen Plotter</h1>
+        <span id="status"></span>
+        <div id="gCodeContainer">
+            <textarea id="gCodeInput" rows="10" cols="50"></textarea>
+            <button id="sendGCodeButton">Enviar G-code</button>
+        </div>
+
+        <button id="pauseButton">Pausar impresión</button>
+
+        <div id="console"></div>
+    </div>
+
+    <script>
+        const printerStatusDiv = document.getElementById('printerStatus');
+        const pauseButton = document.getElementById('pauseButton');
+        const consoleDiv = document.getElementById('console');
+        const spanStatus = document.getElementById('status');
+
+        // Función para actualizar el estado de la impresora
+        function updatePrinterStatus() {
+            fetch('/status')
+                .then(response => response.text())
+                .then(data => {
+                    spanStatus.innerText = data;
+                })
+                .catch(error => console.error('Error:', error));
+        }
+
+        // Actualizar el estado cada 5 segundos
+        setInterval(updatePrinterStatus, 5000);
+
+        const gCodeInput = document.getElementById('gCodeInput');
+        const sendGCodeButton = document.getElementById('sendGCodeButton');
+
+        sendGCodeButton.addEventListener('click', () => {
+            const gCodeContent = gCodeInput.value.trim();
+
+            // Separar el G-code en líneas
+            const gCodeLines = gCodeContent.split('\n');
+
+            // Construir la cadena de texto para enviar al servidor
+            const gCodeString = gCodeLines.join(';');
+
+            fetch('/sendGcode', {
+                method: 'POST',
+                body: gCodeString,
+            })
+                .then(response => response.text())
+                .then(data => {
+                    consoleDiv.innerText += '\nG-code enviado: ' + gCodeString;
+                })
+                .catch(error => console.error('Error:', error));
+        });
+
+
+        // Manejar el botón de pausa
+        pauseButton.addEventListener('click', function () {
+            fetch('/pause', { method: 'POST', body: '' })
+                .then(response => response.text())
+                .then(data => {
+                    consoleDiv.innerText += '\n' + data;
+                })
+                .catch(error => console.error('Error:', error));
+        });
+    </script>
+</body>
+
+</html>)";
+  }
 };

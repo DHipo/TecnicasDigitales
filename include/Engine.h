@@ -1,3 +1,5 @@
+#pragma once
+
 #include <HardwareSerial.h>
 #include <Arduino.h>
 #include <AccelStepper.h>
@@ -66,11 +68,14 @@ namespace Engine
 
     std::vector<String> m_currentGcode = gcode_rectangulo;
 
+    String m_currentLine = "";
     File m_currentFile;
     String m_nameCurrentFile;
 
     HardwareSerial SerialX(1);
     HardwareSerial SerialY(2);
+
+    static bool m_shouldPause = false;
 
     fVec2 currentPosition;
 
@@ -81,8 +86,14 @@ namespace Engine
     TaskHandle_t printingTaskHandle = NULL;
     bool taskShouldRun = false;
 
+    String getCurrentLine()
+    {
+        return m_currentLine;
+    }
+
     void StartPrinting()
     {
+        Serial.printf("current size of gcode: %d", m_currentGcode.size());
         for (int i = 0; i < m_currentGcode.size(); i++){
             interpretarGcode(m_currentGcode[i]);
             delay(500);
@@ -130,8 +141,8 @@ namespace Engine
     void moverMotores(float posX, float posY)
     {
         // Mover ambos motores a las nuevas posiciones
-        motorX.move(posX * STEPS_PER_MM);
-        motorY.move(posY * STEPS_PER_MM);
+        motorX.move( (posX - position.x) * STEPS_PER_MM);
+        motorY.move( (posY - position.y) * STEPS_PER_MM);
 
         while (motorX.isRunning() || motorY.isRunning())
         {

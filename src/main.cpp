@@ -2,7 +2,7 @@
 #include "Engine.h"
 #include <Arduino.h>
 
-#define PIN_PULSADOR 21
+#define PIN_PULSADOR 4
 
 void setup()
 {
@@ -11,16 +11,14 @@ void setup()
   
   // Haciendo referencia al namespace creado
   // llamo a la función init
-  Network::Init();
+  Network::Init(true);
   Engine::initMotores();
   delay(100);
 
+  attachInterrupt(digitalPinToInterrupt(PIN_PULSADOR), Engine::StartPrintingAsync, HIGH);
 }
 
 void loop()
 {
-  if (digitalRead(PIN_PULSADOR)){
-    delay(1000);
-    Engine::StartPrintingAsync();
-  }
+  Network::Run();
 }
