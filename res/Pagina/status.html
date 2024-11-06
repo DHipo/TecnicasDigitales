@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estado del Pen Plotter</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+        #container { max-width: 800px; margin: 0 auto; background-color: #f0f0f0; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        #printerStatus { margin-top: 20px; font-weight: bold; color: #00698f; }
+        #console { margin-top: 20px; background-color: #333; color: white; padding: 10px; border-radius: 5px; overflow-y: scroll; height: 150px; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>Estado del Pen Plotter</h1>
+        
+        <div id="printerStatus">Estado: Cargando...</div>
+        
+        <div id="console"></div>
+    </div>
+
+    <script>
+        const printerStatusDiv = document.getElementById('printerStatus');
+        const consoleDiv = document.getElementById('console');
+
+        // Función para actualizar el estado de la impresora
+        function updatePrinterStatus() {
+            fetch('/status')
+                .then(response => response.text())
+                .then(data => {
+                    printerStatusDiv.innerHTML = 'Estado: ' + data;
+                    consoleDiv.innerText += '\n' + new Date().toLocaleTimeString() + ' - Estado actualizado: ' + data;
+                    consoleDiv.scrollTop = consoleDiv.scrollHeight; // Scroll automático hacia abajo
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    printerStatusDiv.innerHTML = 'Estado: Error al obtener el estado';
+                });
+        }
+
+        // Actualizar el estado cada 5 segundos
+        setInterval(updatePrinterStatus, 5000);
+
+        // Inicializa la actualización del estado
+        updatePrinterStatus();
+    </script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+#include "Network.h"
 #include <Arduino.h>
 #include <AccelStepper.h>
 
@@ -319,10 +320,23 @@ void initMotores(){
   backToOrigin();
 }
 
+void setup() {
+  Serial.begin(115200) ;
+  // put your setup code here, to run once:
+  int result = myFunction(2, 3);
+}
+
+void loop() {
+
 void setup()
 {
   Serial.begin(115200);
-  pinMode(PIN_PULSADOR, INPUT);
+  pinMode(PIN_PULSADOR, INPUT);  
+  
+  // Haciendo referencia al namespace creado
+  // llamo a la función init
+  Network::Init();
+  
   initMotores();
   delay(100);
 
@@ -338,4 +352,6 @@ void loop()
 {
   if (digitalRead(PIN_PULSADOR))
     backToOrigin();
+  // put your main code here, to run repeatedly:
+  Network::Run();
 }
