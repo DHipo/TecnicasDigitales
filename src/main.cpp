@@ -11,7 +11,7 @@ void setup()
   
   // Haciendo referencia al namespace creado
   // llamo a la función init
-  Network::Init(true);
+  Network::Init(true, false);
   Engine::initMotores();
   delay(100);
 

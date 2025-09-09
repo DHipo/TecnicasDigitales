@@ -225,6 +225,10 @@ namespace Network
     server.on("/upload", HTTP_POST, responseUploadFile, handleUpload);
 
     server.on("/pause", HTTP_POST, handlePause);
+    server.on("/start", [](){
+      Engine::StartPrintingAsync();
+      server.send(200, "text/plain", "printing...");
+    });
 
     server.on("/list", HTTP_GET, listFiles);
     server.on("/sendGcode", HTTP_POST, []()
@@ -244,142 +248,265 @@ namespace Network
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Controlador de Pen Plotter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
+            font-family: 'Inter', sans-serif;
         }
 
-        #container {
-            max-width: 800px;
-            margin: 0 auto;
-            background-color: #f0f0f0;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-        }
-
-        button {
-            margin: 10px;
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: background-color 0.3s ease;
-        }
-
-        button:hover {
-            background-color: #ddd;
-        }
-
+        /* Oculta el input de tipo file por defecto */
         input[type="file"] {
             display: none;
         }
 
-        label {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: #007bff;
-            color: white;
-            border-radius: 5px;
-            cursor: pointer;
+        /* Estilos para el scrollbar */
+        #console::-webkit-scrollbar {
+            width: 8px;
         }
 
-        label:hover {
-            background-color: #0056b3;
+        #console::-webkit-scrollbar-track {
+            background: #4b5563;
+            border-radius: 10px;
         }
 
-        #printerStatus {
-            margin-top: 20px;
-            font-weight: bold;
-            color: #00698f;
+        #console::-webkit-scrollbar-thumb {
+            background-color: #d1d5db;
+            border-radius: 10px;
+            border: 2px solid #4b5563;
         }
 
-        #console {
-            margin-top: 20px;
-            background-color: #333;
-            color: white;
-            padding: 10px;
-            border-radius: 5px;
-            overflow-y: scroll;
-            height: 150px;
-        }
-
-        #status {
-            font-size: larger;
+        .CodeMirror {
+            border: 2px solid #e5e7eb;
+            border-radius: 0.5rem;
+            height: 320px;
+            font-size: 14px;
         }
     </style>
-</head>
+</head>"
 
-<body>
-    <div id="container">
-        <h1>Controlador de Pen Plotter</h1>
-        <span id="status"></span>
-        <div id="gCodeContainer">
-            <textarea id="gCodeInput" rows="10" cols="50"></textarea>
-            <button id="sendGCodeButton">Enviar G-code</button>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <div
+        class="bg-white rounded-xl shadow-2xl p-6 md:p-10 w-full max-w-5xl flex flex-col lg:flex-row gap-6 lg:gap-10">
+
+        <!-- Columna de control principal -->
+        <div class="flex-1 flex flex-col space-y-6">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800 text-center">Controlador de Pen Plotter</h1>
+
+            <!-- Estado de la impresora -->
+            <div class="bg-gray-200 rounded-lg p-4 shadow-inner text-center">
+                <p class="text-lg font-semibold text-gray-600">Estado de la impresora:</p>
+                <span id="status" class="text-xl font-bold text-gray-800 mt-1 block">Conectando...</span>
+            </div>
+
+            <!-- Carga de G-code -->
+            <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+                <label for="fileInput"
+                    class="flex-1 text-center bg-blue-600 text-white font-medium py-3 px-6 rounded-lg cursor-pointer hover:bg-blue-700 transition duration-300 ease-in-out transform hover:scale-105 shadow-md">
+                    Seleccionar archivo G-code
+                </label>
+                <input type="file" id="fileInput" accept=".gcode,.txt">
+            </div>
+
+            <!-- Editor de código para G-code -->
+            <textarea id="gCodeEditor" class="hidden"></textarea>
+            <div id="gCodeEditorContainer" class="w-full"></div>
+
+            <!-- Botones de acción -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <button id="sendGCodeButton"
+                    class="bg-green-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-green-700 transition duration-300 ease-in-out transform hover:scale-105 shadow-md">
+                    Enviar G-code
+                </button>
+                <button id="pauseButton"
+                    class="bg-yellow-500 text-gray-800 font-bold py-3 px-6 rounded-lg hover:bg-yellow-600 transition duration-300 ease-in-out transform hover:scale-105 shadow-md">
+                    Pausar impresión
+                </button>
+            </div>
         </div>
 
-        <button id="pauseButton">Pausar impresión</button>
+        <!-- Columna de consola y control manual -->
+        <div class="flex-1 flex flex-col gap-6">
+            <!-- Consola -->
+            <div class="flex-1 flex flex-col">
+                <h2 class="text-xl md:text-2xl font-semibold text-gray-800 mb-2 text-center">Consola</h2>
+                <div id="console"
+                    class="bg-gray-800 text-white p-4 rounded-lg overflow-y-auto h-64 text-sm flex-1">
+                    <!-- Los mensajes de la consola aparecerán aquí -->
+                </div>
+            </div>
 
-        <div id="console"></div>
+            <!-- Control manual -->
+            <div class="bg-gray-100 p-4 rounded-lg shadow-inner">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4 text-center">Control Manual</h2>
+                <div class="grid grid-cols-3 gap-2 w-48 mx-auto">
+                    <div></div>
+                    <button class="bg-gray-300 text-gray-800 rounded-full w-10 h-10 flex items-center justify-center shadow-md hover:bg-gray-400" onclick="sendManualCommand('G0 Y10')\">▲</button>
+                    <div></div>
+                    <button class="bg-gray-300 text-gray-800 rounded-full w-10 h-10 flex items-center justify-center shadow-md hover:bg-gray-400" onclick="sendManualCommand('G0 X-10')\">◄</button>
+                    <button class="bg-gray-300 text-gray-800 rounded-full w-10 h-10 flex items-center justify-center shadow-md hover:bg-gray-400" onclick="sendManualCommand('G0 X10 Y10 Z0')\">⌂</button>
+                    <button class="bg-gray-300 text-gray-800 rounded-full w-10 h-10 flex items-center justify-center shadow-md hover:bg-gray-400" onclick="sendManualCommand('G0 X10')\">►</button>
+                    <div></div>
+                    <button class="bg-gray-300 text-gray-800 rounded-full w-10 h-10 flex items-center justify-center shadow-md hover:bg-gray-400" onclick="sendManualCommand('G0 Y-10')\">▼</button>
+                    <div></div>
+                </div>
+                <div class="mt-4 flex flex-row gap-2 justify-center">
+                    <button class="bg-purple-500 text-white py-2 px-4 rounded-lg shadow-md hover:bg-purple-600" onclick="sendManualCommand('M3')\">Pluma Abajo</button>
+                    <button class="bg-indigo-500 text-white py-2 px-4 rounded-lg shadow-md hover:bg-indigo-600" onclick="sendManualCommand('M5')\">Pluma Arriba</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
-        const printerStatusDiv = document.getElementById('printerStatus');
+        // Referencias a los elementos del DOM
+        const statusSpan = document.getElementById('status');
+        const fileInput = document.getElementById('fileInput');
+        const gCodeEditorContainer = document.getElementById('gCodeEditorContainer');
+        const gCodeInput = document.getElementById('gCodeEditor');
+        const sendGCodeButton = document.getElementById('sendGCodeButton');
         const pauseButton = document.getElementById('pauseButton');
         const consoleDiv = document.getElementById('console');
-        const spanStatus = document.getElementById('status');
 
-        // Función para actualizar el estado de la impresora
-        function updatePrinterStatus() {
-            fetch('/status')
-                .then(response => response.text())
-                .then(data => {
-                    spanStatus.innerText = data;
-                })
-                .catch(error => console.error('Error:', error));
+        // Inicializar CodeMirror
+        const editor = CodeMirror.fromTextArea(gCodeInput, {
+            lineNumbers: true,
+            mode: "clike",
+            theme: "monokai",
+            matchBrackets: true,
+            indentUnit: 4,
+            smartIndent: true,
+            tabSize: 4,
+            indentWithTabs: false,
+            autofocus: true
+        });
+
+        // Montar el editor en el contenedor
+        gCodeEditorContainer.appendChild(editor.getWrapperElement());
+
+        // Función para agregar un mensaje a la consola
+        function logToConsole(message) {
+            const now = new Date();
+            const timestamp = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+            consoleDiv.innerHTML += `<p class="text-gray-400"><strong>[${timestamp}]</strong> ${message}</p>`;
+            consoleDiv.scrollTop = consoleDiv.scrollHeight; // Desplazarse al final
         }
 
-        // Actualizar el estado cada 5 segundos
-        setInterval(updatePrinterStatus, 5000);
+        // Función para actualizar el estado de la impresora desde el ESP32
+        function updatePrinterStatus() {
+            fetch('/status')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('No se pudo conectar con el ESP32.');
+                    }
+                    return response.text();
+                })
+                .then(data => {
+                    statusSpan.innerText = data;
+                })
+                .catch(error => {
+                    statusSpan.innerText = 'Desconectado';
+                    logToConsole(`Error: ${error.message}`);
+                });
+        }
 
-        const gCodeInput = document.getElementById('gCodeInput');
-        const sendGCodeButton = document.getElementById('sendGCodeButton');
+        // Cargar el archivo G-code cuando se selecciona uno
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    editor.setValue(e.target.result);
+                    logToConsole(`Archivo "${file.name}" cargado correctamente.`);
+                };
+                reader.onerror = () => {
+                    logToConsole("Error al leer el archivo.");
+                };
+                reader.readAsText(file);
+            }
+        });
 
+        // Enviar G-code al ESP32
         sendGCodeButton.addEventListener('click', () => {
-            const gCodeContent = gCodeInput.value.trim();
+            const gCodeContent = editor.getValue().trim();
+            if (gCodeContent.length === 0) {
+                logToConsole("El campo de G-code está vacío.");
+                return;
+            }
 
-            // Separar el G-code en líneas
             const gCodeLines = gCodeContent.split('\n');
+            const filteredGCodeLines = gCodeLines.filter(line => line.trim() !== '');
+            const gCodeString = filteredGCodeLines.join(';');
 
-            // Construir la cadena de texto para enviar al servidor
-            const gCodeString = gCodeLines.join(';');
+            logToConsole("Enviando G-code...");
 
             fetch('/sendGcode', {
                 method: 'POST',
+                headers: {
+                    'Content-Type': 'text/plain'
+                },
                 body: gCodeString,
             })
                 .then(response => response.text())
                 .then(data => {
-                    consoleDiv.innerText += '\nG-code enviado: ' + gCodeString;
+                    logToConsole(`Respuesta del ESP32: ${data}`);
                 })
-                .catch(error => console.error('Error:', error));
+                .catch(error => {
+                    logToConsole(`Error al enviar G-code: ${error.message}`);
+                });
         });
 
+        // Enviar un solo comando G-code manualmente
+        function sendManualCommand(command) {
+            logToConsole(`Enviando comando manual: ${command}`);
+            fetch('/sendGcode', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'text/plain'
+                },
+                body: command + ';',
+            })
+            .then(response => response.text())
+            .then(data => {
+                logToConsole(`Respuesta del ESP32: ${data}`);
+            })
+            .catch(error => {
+                logToConsole(`Error al enviar comando manual: ${error.message}`);
+            });
+        }
 
-        // Manejar el botón de pausa
+        // Pausar la impresión
         pauseButton.addEventListener('click', function () {
-            fetch('/pause', { method: 'POST', body: '' })
+            logToConsole("Solicitando pausa...");
+            fetch('/pause', {
+                method: 'POST'
+            })
                 .then(response => response.text())
                 .then(data => {
-                    consoleDiv.innerText += '\n' + data;
+                    logToConsole(`Respuesta del ESP32: ${data}`);
                 })
-                .catch(error => console.error('Error:', error));
+                .catch(error => {
+                    logToConsole(`Error al pausar: ${error.message}`);
+                });
+        });
+
+        // Actualizar el estado de la impresora cada 3 segundos
+        setInterval(updatePrinterStatus, 3000);
+
+        // Inicializar
+        document.addEventListener('DOMContentLoaded', () => {
+            updatePrinterStatus();
+            logToConsole("Interfaz de Pen Plotter lista. ¡Conectando con ESP32!");
         });
     </script>
 </body>
 
 </html>)";
-  }
+      }
 };
